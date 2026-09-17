@@ -1,0 +1,16 @@
+# Go
+*.test
+*.out
+
+# Generated Windows resource
+rsrc_windows_amd64.syso
+
+# Build output, except the preserved historical executable
+/dist/*
+!/dist/Enter_Scheduler_3D_original.exe
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
