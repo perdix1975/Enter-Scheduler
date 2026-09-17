@@ -14,6 +14,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+      - name: Embed application icon
+        shell: pwsh
+        run: |
+          go install github.com/akavel/rsrc@latest
+          & "$env:USERPROFILE\go\bin\rsrc.exe" -ico assets\enter_scheduler.ico -o rsrc_windows_amd64.syso
       - name: Verify source
         run: |
           go fmt ./...
