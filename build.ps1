@@ -3,15 +3,17 @@ Set-Location $PSScriptRoot
 
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-# Embed the application icon when rsrc is available.
-if (-not (Get-Command rsrc -ErrorAction SilentlyContinue)) {
-    Write-Host 'Installing rsrc (one-time)...'
-    go install github.com/akavel/rsrc@latest
-    $env:Path += ";$env:USERPROFILE\go\bin"
-}
+# Embed the custom icon when the recovered .ico asset is present.
+if (Test-Path 'assets\enter_scheduler.ico') {
+    if (-not (Get-Command rsrc -ErrorAction SilentlyContinue)) {
+        Write-Host 'Installing rsrc (one-time)...'
+        go install github.com/akavel/rsrc@latest
+        $env:Path += ";$env:USERPROFILE\go\bin"
+    }
 
-if (Get-Command rsrc -ErrorAction SilentlyContinue) {
-    rsrc -ico assets\enter_scheduler.ico -o rsrc_windows_amd64.syso
+    if (Get-Command rsrc -ErrorAction SilentlyContinue) {
+        rsrc -ico assets\enter_scheduler.ico -o rsrc_windows_amd64.syso
+    }
 }
 
 go fmt ./...
