@@ -16,6 +16,7 @@ The application was originally built on 6 August 2026 as `Enter_Scheduler_3D.exe
 - Optional minimization after scheduling.
 - Diagnostic crash log at `%TEMP%\Enter_Scheduler_error.txt`.
 - Native Win32 GUI; no PowerShell or .NET runtime dependency.
+- The recovered original application icon is included in `assets/enter_scheduler.ico` and embedded in normal builds.
 
 ## Build
 
@@ -31,7 +32,7 @@ The script writes:
 dist/Enter_Scheduler.exe
 ```
 
-If `assets/enter_scheduler.ico` is present locally, `build.ps1` embeds it automatically. The GitHub Actions workflow builds a Windows x64 executable on every push and pull request and publishes it as an Actions artifact.
+The GitHub Actions workflow also builds the Windows x64 executable on every push and pull request and publishes it as an Actions artifact.
 
 ## Project history
 
@@ -43,7 +44,7 @@ SHA-256 of the recovered original `Enter_Scheduler_3D.exe`:
 c4c45f8ee89aad0bf374266b0ba72607705dbc3aef3dcde1e14eba077ab824c7
 ```
 
-The historical executable, icon and screenshot are retained in the recovery package used to reconstruct this repository; they are intentionally not required for building from source.
+The historical executable and screenshot are retained separately in the recovery package used to reconstruct this repository; neither is required for building from source.
 
 ## License
 
