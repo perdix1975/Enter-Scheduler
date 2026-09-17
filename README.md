@@ -1,22 +1,38 @@
 # Enter Scheduler
 
-A small native 64-bit Windows utility that schedules a single **Enter** keystroke for a selected top-level window.
+A small native 64-bit Windows utility that schedules a keyboard sequence for a selected top-level window.
 
 The application was originally built on 6 August 2026 as `Enter_Scheduler_3D.exe`. The source in this repository is a reconstructed, maintainable version based on the final executable's verified behaviour and recovered symbols/strings.
 
-## Features
+## Current sequence
+
+At the selected first-execution time, Enter Scheduler can now run this sequence:
+
+1. Wait for a configurable **pre-text delay** in milliseconds.
+2. Activate and verify the selected target window.
+3. Type the configured **Unicode text** (the text may also be empty).
+4. Wait for a configurable **text-to-Enter delay** in milliseconds.
+5. Re-activate and verify the same target window.
+6. Send **Enter**.
+7. Optionally repeat the whole sequence after a configurable loop interval.
+
+The loop interval has separate fields for **hours, minutes, seconds, and milliseconds**. When all four loop fields are zero, the sequence runs once. When a loop is configured, the interval is counted after a completed Enter before the next sequence begins, so executions never overlap.
+
+`Δοκιμή ακολουθίας` executes the complete delay → text → delay → Enter sequence immediately and exactly once, ignoring the loop setting.
+
+## Safety behaviour
 
 - Lists visible top-level windows and lets you lock one as the target.
-- Selects hour and minute and schedules the next matching local time.
-- Live countdown.
-- `Δοκιμή Enter` sends an immediate test Enter to the selected window.
-- Restores and activates the selected target before sending Enter.
-- Verifies that the intended target actually became the foreground window; it does **not** send Enter elsewhere if activation is blocked.
-- Detects if the target window closes while a schedule is active.
+- Restores and activates the selected target before typing and again before Enter.
+- Verifies that the intended target actually became the foreground window.
+- If activation fails, it does **not** type text or send Enter elsewhere.
+- Detects if the target window closes while a schedule or loop is active.
+- Locks configuration controls while a run is active, so one loop keeps a stable configuration.
+- `Ακύρωση` stops the active schedule/loop.
 - Optional minimization after scheduling.
 - Diagnostic crash log at `%TEMP%\Enter_Scheduler_error.txt`.
-- Native Win32 GUI; no PowerShell or .NET runtime dependency.
-- The recovered application icon is included in `assets/enter_scheduler.ico`.
+
+Milliseconds are accepted by the UI and deadlines are tracked at millisecond resolution. Actual delivery timing is still subject to normal Windows scheduling/timer latency.
 
 ## Build
 
@@ -35,9 +51,9 @@ dist/
     enter_scheduler.ico
 ```
 
-The program loads the recovered icon from the adjacent `assets` folder at runtime. This avoids a fragile external resource-compiler dependency while preserving the application's icon in the window/taskbar.
+The program loads the recovered icon from the adjacent `assets` folder at runtime. If that file is absent, the program still runs using the standard Windows application icon.
 
-The GitHub Actions workflow builds the same Windows x64 distribution on every push and pull request and publishes it as an Actions artifact.
+The GitHub Actions workflow builds the Windows x64 distribution on every push and pull request and publishes it as an Actions artifact.
 
 ## Project history
 
@@ -48,8 +64,6 @@ SHA-256 of the recovered original `Enter_Scheduler_3D.exe`:
 ```text
 c4c45f8ee89aad0bf374266b0ba72607705dbc3aef3dcde1e14eba077ab824c7
 ```
-
-The historical executable and screenshot are retained separately in the recovery package used to reconstruct this repository; neither is required for building from source.
 
 ## License
 
