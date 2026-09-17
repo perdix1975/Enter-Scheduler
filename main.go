@@ -17,52 +17,55 @@ import (
 const (
 	appTitle = "Enter Scheduler"
 
-	WS_OVERLAPPED      = 0x00000000
-	WS_CAPTION         = 0x00C00000
-	WS_SYSMENU         = 0x00080000
-	WS_MINIMIZEBOX     = 0x00020000
-	WS_VISIBLE         = 0x10000000
-	WS_CHILD           = 0x40000000
-	WS_TABSTOP         = 0x00010000
-	WS_VSCROLL         = 0x00200000
-	WS_EX_CLIENTEDGE   = 0x00000200
-	WS_EX_APPWINDOW    = 0x00040000
-	CBS_DROPDOWNLIST   = 0x0003
-	CBS_HASSTRINGS     = 0x0200
-	BS_PUSHBUTTON      = 0x00000000
-	BS_DEFPUSHBUTTON   = 0x00000001
-	BS_AUTOCHECKBOX    = 0x00000003
-	SS_LEFT            = 0x00000000
-	SW_RESTORE         = 9
-	SW_MINIMIZE        = 6
-	SW_SHOW            = 5
-	GA_ROOT            = 2
-	GW_OWNER           = 4
-	WM_CREATE          = 0x0001
-	WM_DESTROY         = 0x0002
-	WM_CLOSE           = 0x0010
-	WM_COMMAND         = 0x0111
-	WM_TIMER           = 0x0113
-	WM_SETFONT         = 0x0030
-	WM_SETICON         = 0x0080
-	ICON_SMALL         = 0
-	ICON_BIG           = 1
-	BM_GETCHECK        = 0x00F0
-	BST_CHECKED        = 1
-	CBN_SELCHANGE      = 1
-	CB_ADDSTRING       = 0x0143
-	CB_GETCURSEL       = 0x0147
-	CB_SETCURSEL       = 0x014E
-	CB_RESETCONTENT    = 0x014B
-	MB_OK              = 0x00000000
-	MB_ICONINFORMATION = 0x00000040
-	MB_ICONWARNING     = 0x00000030
-	MB_ICONERROR       = 0x00000010
+	WS_OVERLAPPED     = 0x00000000
+	WS_CAPTION        = 0x00C00000
+	WS_SYSMENU        = 0x00080000
+	WS_MINIMIZEBOX    = 0x00020000
+	WS_VISIBLE        = 0x10000000
+	WS_CHILD          = 0x40000000
+	WS_TABSTOP        = 0x00010000
+	WS_VSCROLL        = 0x00200000
+	WS_BORDER         = 0x00800000
+	WS_EX_CLIENTEDGE  = 0x00000200
+	WS_EX_APPWINDOW   = 0x00040000
+	CBS_DROPDOWNLIST  = 0x0003
+	CBS_HASSTRINGS    = 0x0200
+	BS_PUSHBUTTON     = 0x00000000
+	BS_DEFPUSHBUTTON  = 0x00000001
+	BS_AUTOCHECKBOX   = 0x00000003
+	SS_LEFT           = 0x00000000
+	ES_AUTOHSCROLL    = 0x0080
+	ES_NUMBER         = 0x2000
+	SW_RESTORE        = 9
+	SW_MINIMIZE       = 6
+	SW_SHOW           = 5
+	GA_ROOT           = 2
+	GW_OWNER          = 4
+	WM_DESTROY        = 0x0002
+	WM_CLOSE          = 0x0010
+	WM_COMMAND        = 0x0111
+	WM_TIMER          = 0x0113
+	WM_SETFONT        = 0x0030
+	WM_SETICON        = 0x0080
+	ICON_SMALL        = 0
+	ICON_BIG          = 1
+	BM_GETCHECK       = 0x00F0
+	BST_CHECKED       = 1
+	CBN_SELCHANGE     = 1
+	CB_ADDSTRING      = 0x0143
+	CB_GETCURSEL      = 0x0147
+	CB_SETCURSEL      = 0x014E
+	CB_RESETCONTENT   = 0x014B
+	EM_SETLIMITTEXT   = 0x00C5
+	MB_OK             = 0x00000000
+	MB_ICONWARNING    = 0x00000030
+	MB_ICONERROR      = 0x00000010
 	MB_YESNO           = 0x00000004
 	IDYES              = 6
 	VK_RETURN          = 0x0D
 	INPUT_KEYBOARD     = 1
 	KEYEVENTF_KEYUP    = 0x0002
+	KEYEVENTF_UNICODE  = 0x0004
 	SPI_GETWORKAREA    = 0x0030
 	SM_CXSCREEN        = 0
 	SM_CYSCREEN        = 1
@@ -72,8 +75,11 @@ const (
 	IMAGE_ICON         = 1
 	LR_LOADFROMFILE    = 0x0010
 	LR_DEFAULTSIZE     = 0x0040
-	ERROR_SUCCESS      = 0
 	timerID            = 1
+	timerPeriodMs      = 10
+	maxDelayMs         = 2147483647 // ~24.8 days
+	maxLoopHours       = 100000
+	maxTextUTF16Units  = 4096
 )
 
 const (
@@ -81,10 +87,23 @@ const (
 	idRefresh
 	idHourCombo
 	idMinuteCombo
+	idPreDelay
+	idText
+	idPostDelay
+	idLoopHours
+	idLoopMinutes
+	idLoopSeconds
+	idLoopMillis
 	idStart
 	idCancel
 	idTest
 	idMinimize
+)
+
+const (
+	phaseWaitingTrigger = iota
+	phaseWaitingText
+	phaseWaitingEnter
 )
 
 type POINT struct{ X, Y int32 }
@@ -127,6 +146,12 @@ type INPUT struct {
 type WindowItem struct {
 	hwnd  uintptr
 	title string
+}
+type RunConfig struct {
+	preDelay     time.Duration
+	text         string
+	postDelay    time.Duration
+	loopInterval time.Duration
 }
 
 var (
@@ -176,14 +201,22 @@ var (
 	pGetTempPathW       = kernel32.NewProc("GetTempPathW")
 	pGetStockObject     = gdi32.NewProc("GetStockObject")
 
-	hwndMain                                    uintptr
-	hTarget, hHour, hMinute                     uintptr
-	hRefresh, hStart, hCancel, hTest, hMinimize uintptr
-	hSelected, hCountdown, hStatus              uintptr
-	windowsList                                 []WindowItem
-	lockedTarget                                WindowItem
-	scheduledAt                                 time.Time
-	scheduling                                  bool
+	hwndMain uintptr
+
+	hTarget, hHour, hMinute                         uintptr
+	hPreDelay, hText, hPostDelay                    uintptr
+	hLoopHours, hLoopMinutes, hLoopSeconds, hLoopMs uintptr
+	hRefresh, hStart, hCancel, hTest, hMinimize     uintptr
+	hSelected, hCountdown, hStatus                  uintptr
+
+	windowsList  []WindowItem
+	lockedTarget WindowItem
+	runConfig    RunConfig
+	nextActionAt time.Time
+	runActive    bool
+	testMode     bool
+	phase        int
+	runCount     int
 )
 
 func utf16Ptr(s string) *uint16 { p, _ := syscall.UTF16PtrFromString(s); return p }
@@ -197,13 +230,26 @@ func showMessage(title, text string, flags uintptr) int {
 	r, _, _ := pMessageBoxW.Call(hwndMain, uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(unsafe.Pointer(utf16Ptr(title))), flags)
 	return int(r)
 }
-
-func createControl(class, text string, style uint32, x, y, w, h int32, id int) uintptr {
-	r, _, _ := pCreateWindowExW.Call(0,
+func createControlEx(exStyle uint32, class, text string, style uint32, x, y, w, h int32, id int) uintptr {
+	r, _, _ := pCreateWindowExW.Call(uintptr(exStyle),
 		uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))),
 		uintptr(style|WS_CHILD|WS_VISIBLE), uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		hwndMain, uintptr(id), 0, 0)
 	return r
+}
+func createControl(class, text string, style uint32, x, y, w, h int32, id int) uintptr {
+	return createControlEx(0, class, text, style, x, y, w, h, id)
+}
+func createEdit(text string, numeric bool, x, y, w, h int32, id int, limit uintptr) uintptr {
+	style := uint32(WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL)
+	if numeric {
+		style |= ES_NUMBER
+	}
+	hwnd := createControlEx(WS_EX_CLIENTEDGE, "EDIT", text, style, x, y, w, h, id)
+	if limit > 0 {
+		pSendMessageW.Call(hwnd, EM_SETLIMITTEXT, limit, 0)
+	}
+	return hwnd
 }
 func addComboItem(hwnd uintptr, text string) {
 	pSendMessageW.Call(hwnd, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(utf16Ptr(text))))
@@ -224,8 +270,7 @@ func setEnabled(hwnd uintptr, on bool) {
 	}
 	pEnableWindow.Call(hwnd, v)
 }
-
-func getWindowTitle(hwnd uintptr) string {
+func getControlText(hwnd uintptr) string {
 	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
 	if n == 0 {
 		return ""
@@ -234,6 +279,7 @@ func getWindowTitle(hwnd uintptr) string {
 	pGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), n+1)
 	return syscall.UTF16ToString(buf)
 }
+
 func enumWindowsProc(hwnd, lparam uintptr) uintptr {
 	if hwnd == hwndMain {
 		return 1
@@ -250,7 +296,7 @@ func enumWindowsProc(hwnd, lparam uintptr) uintptr {
 	if owner != 0 {
 		return 1
 	}
-	title := strings.TrimSpace(getWindowTitle(hwnd))
+	title := strings.TrimSpace(getControlText(hwnd))
 	if title == "" {
 		return 1
 	}
@@ -338,47 +384,27 @@ func sendKeyboardEnter() bool {
 	r, _, _ := pSendInput.Call(2, uintptr(unsafe.Pointer(&inputs[0])), unsafe.Sizeof(inputs[0]))
 	return r == 2
 }
-func executeEnter(test bool) {
-	target := lockedTarget
-	if !scheduling || test {
-		var ok bool
-		target, ok = currentTarget()
-		if !ok {
-			showMessage(appTitle, "Επίλεξε πρώτα ένα παράθυρο-στόχο.", MB_OK|MB_ICONWARNING)
-			return
-		}
+func sendUnicodeText(text string) bool {
+	if text == "" {
+		return true
 	}
-	if !isValidWindow(target.hwnd) {
-		showMessage(appTitle, "Το επιλεγμένο παράθυρο έχει κλείσει. Το Enter δεν στάλθηκε.", MB_OK|MB_ICONWARNING)
-		if scheduling {
-			cancelSchedule(false)
-		}
-		return
+	units, err := syscall.UTF16FromString(text)
+	if err != nil {
+		return false
 	}
-	setText(hStatus, "Ενεργοποίηση του επιλεγμένου παραθύρου…")
-	if !activateTarget(target.hwnd) {
-		showMessage(appTitle, "Τα Windows δεν επέτρεψαν την ενεργοποίηση του επιλεγμένου παραθύρου. Το Enter δεν στάλθηκε αλλού. Αν η εφαρμογή-στόχος εκτελείται ως διαχειριστής, εκτέλεσε και το Enter Scheduler ως διαχειριστής.", MB_OK|MB_ICONWARNING)
-		if scheduling {
-			cancelSchedule(false)
-		}
-		return
+	units = units[:len(units)-1] // strip terminating NUL
+	if len(units) == 0 {
+		return true
 	}
-	if !sendKeyboardEnter() {
-		showMessage(appTitle, "Το παράθυρο ενεργοποιήθηκε, αλλά η αποστολή του Enter απέτυχε.", MB_OK|MB_ICONERROR)
-		if scheduling {
-			cancelSchedule(false)
-		}
-		return
+	inputs := make([]INPUT, 0, len(units)*2)
+	for _, unit := range units {
+		inputs = append(inputs,
+			INPUT{Type: INPUT_KEYBOARD, Ki: KEYBDINPUT{WScan: unit, DwFlags: KEYEVENTF_UNICODE}},
+			INPUT{Type: INPUT_KEYBOARD, Ki: KEYBDINPUT{WScan: unit, DwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP}},
+		)
 	}
-	if test {
-		setText(hStatus, "Η δοκιμή Enter στάλθηκε στο: "+target.title)
-	} else {
-		setText(hStatus, "Το Enter στάλθηκε στο: "+target.title)
-		pKillTimer.Call(hwndMain, timerID)
-		scheduling = false
-		setSchedulingControls(false)
-		setText(hCountdown, "Απομένει: —")
-	}
+	r, _, _ := pSendInput.Call(uintptr(len(inputs)), uintptr(unsafe.Pointer(&inputs[0])), unsafe.Sizeof(inputs[0]))
+	return r == uintptr(len(inputs))
 }
 
 func comboInt(hwnd uintptr) (int, bool) {
@@ -396,17 +422,159 @@ func nextExecution(hour, minute int) time.Time {
 	}
 	return t
 }
-func setSchedulingControls(on bool) {
-	setEnabled(hTarget, !on)
-	setEnabled(hRefresh, !on)
-	setEnabled(hHour, !on)
-	setEnabled(hMinute, !on)
-	setEnabled(hStart, !on)
-	setEnabled(hCancel, on)
-	setEnabled(hTest, !on)
+func parseIntField(hwnd uintptr, label string, min, max int64) (int64, bool) {
+	s := strings.TrimSpace(getControlText(hwnd))
+	if s == "" {
+		s = "0"
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v < min || v > max {
+		showMessage(appTitle, fmt.Sprintf("Το πεδίο «%s» πρέπει να είναι αριθμός από %d έως %d.", label, min, max), MB_OK|MB_ICONWARNING)
+		return 0, false
+	}
+	return v, true
+}
+func readRunConfig() (RunConfig, bool) {
+	preMs, ok := parseIntField(hPreDelay, "Delay πριν από κείμενο", 0, maxDelayMs)
+	if !ok {
+		return RunConfig{}, false
+	}
+	postMs, ok := parseIntField(hPostDelay, "Delay κειμένου → Enter", 0, maxDelayMs)
+	if !ok {
+		return RunConfig{}, false
+	}
+	lh, ok := parseIntField(hLoopHours, "Loop ώρες", 0, maxLoopHours)
+	if !ok {
+		return RunConfig{}, false
+	}
+	lm, ok := parseIntField(hLoopMinutes, "Loop λεπτά", 0, 59)
+	if !ok {
+		return RunConfig{}, false
+	}
+	ls, ok := parseIntField(hLoopSeconds, "Loop δευτερόλεπτα", 0, 59)
+	if !ok {
+		return RunConfig{}, false
+	}
+	lms, ok := parseIntField(hLoopMs, "Loop ms", 0, 999)
+	if !ok {
+		return RunConfig{}, false
+	}
+	loop := time.Duration(lh)*time.Hour + time.Duration(lm)*time.Minute + time.Duration(ls)*time.Second + time.Duration(lms)*time.Millisecond
+	return RunConfig{
+		preDelay:     time.Duration(preMs) * time.Millisecond,
+		text:         getControlText(hText),
+		postDelay:    time.Duration(postMs) * time.Millisecond,
+		loopInterval: loop,
+	}, true
+}
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	ms := d.Round(time.Millisecond).Milliseconds()
+	if ms < 0 {
+		ms = 0
+	}
+	days := ms / 86400000
+	ms %= 86400000
+	hours := ms / 3600000
+	ms %= 3600000
+	mins := ms / 60000
+	ms %= 60000
+	secs := ms / 1000
+	millis := ms % 1000
+	if days > 0 {
+		return fmt.Sprintf("%d ημ. %02d:%02d:%02d.%03d", days, hours, mins, secs, millis)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, mins, secs, millis)
+}
+func setRunControls(active bool) {
+	for _, h := range []uintptr{
+		hTarget, hRefresh, hHour, hMinute,
+		hPreDelay, hText, hPostDelay,
+		hLoopHours, hLoopMinutes, hLoopSeconds, hLoopMs,
+		hStart, hTest,
+	} {
+		setEnabled(h, !active)
+	}
+	setEnabled(hCancel, active)
+}
+func failRun(message string) {
+	cancelRun(false)
+	showMessage(appTitle, message, MB_OK|MB_ICONWARNING)
+}
+func finishRun(message string) {
+	pKillTimer.Call(hwndMain, timerID)
+	runActive = false
+	testMode = false
+	setRunControls(false)
+	updateTargetPreview()
+	setText(hCountdown, "Απομένει: —")
+	setText(hStatus, message)
+}
+func beginSequence(now time.Time) {
+	phase = phaseWaitingText
+	nextActionAt = now.Add(runConfig.preDelay)
+	if runConfig.preDelay == 0 {
+		performTextStep()
+	}
+}
+func performTextStep() {
+	if !runActive {
+		return
+	}
+	if !isValidWindow(lockedTarget.hwnd) {
+		failRun("Το επιλεγμένο παράθυρο έχει κλείσει. Η ακολουθία ακυρώθηκε.")
+		return
+	}
+	setText(hStatus, "Ενεργοποίηση στόχου και εισαγωγή κειμένου…")
+	if !activateTarget(lockedTarget.hwnd) {
+		failRun("Τα Windows δεν επέτρεψαν την ενεργοποίηση του επιλεγμένου παραθύρου. Δεν στάλθηκε κείμενο ή Enter. Αν η εφαρμογή-στόχος εκτελείται ως διαχειριστής, εκτέλεσε και το Enter Scheduler ως διαχειριστής.")
+		return
+	}
+	if runConfig.text != "" && !sendUnicodeText(runConfig.text) {
+		failRun("Η αποστολή του κειμένου απέτυχε. Το Enter δεν στάλθηκε.")
+		return
+	}
+	phase = phaseWaitingEnter
+	nextActionAt = time.Now().Add(runConfig.postDelay)
+	if runConfig.postDelay == 0 {
+		performEnterStep()
+	}
+}
+func performEnterStep() {
+	if !runActive {
+		return
+	}
+	if !isValidWindow(lockedTarget.hwnd) {
+		failRun("Το επιλεγμένο παράθυρο έχει κλείσει. Το Enter δεν στάλθηκε.")
+		return
+	}
+	setText(hStatus, "Επαλήθευση στόχου και αποστολή Enter…")
+	if !activateTarget(lockedTarget.hwnd) {
+		failRun("Το σωστό παράθυρο δεν μπόρεσε να ενεργοποιηθεί πριν από το Enter. Το Enter δεν στάλθηκε αλλού.")
+		return
+	}
+	if !sendKeyboardEnter() {
+		cancelRun(false)
+		showMessage(appTitle, "Το παράθυρο ενεργοποιήθηκε, αλλά η αποστολή του Enter απέτυχε.", MB_OK|MB_ICONERROR)
+		return
+	}
+	runCount++
+	if testMode {
+		finishRun(fmt.Sprintf("Η δοκιμή ολοκληρώθηκε στο: %s", lockedTarget.title))
+		return
+	}
+	if runConfig.loopInterval <= 0 {
+		finishRun(fmt.Sprintf("Η ακολουθία ολοκληρώθηκε στο: %s", lockedTarget.title))
+		return
+	}
+	phase = phaseWaitingTrigger
+	nextActionAt = time.Now().Add(runConfig.loopInterval)
+	setText(hStatus, fmt.Sprintf("Εκτέλεση #%d ολοκληρώθηκε. Επόμενο loop σε %s.", runCount, formatDuration(runConfig.loopInterval)))
 }
 func startSchedule() {
-	t, ok := currentTarget()
+	target, ok := currentTarget()
 	if !ok {
 		showMessage(appTitle, "Δεν έχει επιλεγεί παράθυρο.", MB_OK|MB_ICONWARNING)
 		return
@@ -417,61 +585,100 @@ func startSchedule() {
 		showMessage(appTitle, "Επίλεξε παράθυρο, ώρα και λεπτά.", MB_OK|MB_ICONWARNING)
 		return
 	}
-	lockedTarget = t
-	scheduledAt = nextExecution(h, m)
-	scheduling = true
-	setSchedulingControls(true)
-	setText(hSelected, "Κλειδωμένος στόχος: "+t.title)
-	setText(hStatus, fmt.Sprintf("Προγραμματίστηκε για %s στις %s", scheduledAt.Format("02/01/2006"), scheduledAt.Format("15:04")))
-	pSetTimer.Call(hwndMain, timerID, 250, 0)
-	updateCountdown()
+	cfg, ok := readRunConfig()
+	if !ok {
+		return
+	}
+	lockedTarget = target
+	runConfig = cfg
+	nextActionAt = nextExecution(h, m)
+	phase = phaseWaitingTrigger
+	runCount = 0
+	testMode = false
+	runActive = true
+	setRunControls(true)
+	setText(hSelected, "Κλειδωμένος στόχος: "+target.title)
+	loopText := "μία εκτέλεση"
+	if cfg.loopInterval > 0 {
+		loopText = "loop κάθε " + formatDuration(cfg.loopInterval)
+	}
+	setText(hStatus, fmt.Sprintf("Προγραμματίστηκε για %s στις %s — %s", nextActionAt.Format("02/01/2006"), nextActionAt.Format("15:04"), loopText))
+	pSetTimer.Call(hwndMain, timerID, timerPeriodMs, 0)
+	updateRunner()
 	checked, _, _ := pSendMessageW.Call(hMinimize, BM_GETCHECK, 0, 0)
 	if checked == BST_CHECKED {
 		pShowWindow.Call(hwndMain, SW_MINIMIZE)
 	}
 }
-func cancelSchedule(notify bool) {
-	if scheduling {
+func startTest() {
+	target, ok := currentTarget()
+	if !ok {
+		showMessage(appTitle, "Επίλεξε πρώτα ένα παράθυρο-στόχο.", MB_OK|MB_ICONWARNING)
+		return
+	}
+	cfg, ok := readRunConfig()
+	if !ok {
+		return
+	}
+	cfg.loopInterval = 0 // A test always runs exactly once.
+	lockedTarget = target
+	runConfig = cfg
+	nextActionAt = time.Now()
+	phase = phaseWaitingTrigger
+	runCount = 0
+	testMode = true
+	runActive = true
+	setRunControls(true)
+	setText(hSelected, "Δοκιμή στον στόχο: "+target.title)
+	setText(hStatus, "Έναρξη δοκιμής της πλήρους ακολουθίας…")
+	pSetTimer.Call(hwndMain, timerID, timerPeriodMs, 0)
+	updateRunner()
+}
+func cancelRun(notify bool) {
+	if runActive {
 		pKillTimer.Call(hwndMain, timerID)
 	}
-	scheduling = false
-	setSchedulingControls(false)
+	runActive = false
+	testMode = false
+	setRunControls(false)
 	updateTargetPreview()
 	setText(hCountdown, "Απομένει: —")
 	if notify {
 		setText(hStatus, "Ο προγραμματισμός ακυρώθηκε.")
 	}
 }
-func updateCountdown() {
-	if !scheduling {
+func updateRunner() {
+	if !runActive {
 		return
 	}
 	if !isValidWindow(lockedTarget.hwnd) {
-		cancelSchedule(false)
+		cancelRun(false)
 		showMessage(appTitle, "Το επιλεγμένο παράθυρο δεν υπάρχει πλέον. Πάτησε «Ανανέωση» και επίλεξέ το ξανά.", MB_OK|MB_ICONWARNING)
 		return
 	}
-	d := time.Until(scheduledAt)
-	if d <= 0 {
-		pKillTimer.Call(hwndMain, timerID)
-		setText(hCountdown, "Η ώρα έφτασε. Αποστολή Enter…")
-		executeEnter(false)
+	d := time.Until(nextActionAt)
+	if d > 0 {
+		switch phase {
+		case phaseWaitingTrigger:
+			if runCount > 0 {
+				setText(hCountdown, "Επόμενο loop σε: "+formatDuration(d))
+			} else {
+				setText(hCountdown, "Απομένει: "+formatDuration(d))
+			}
+		case phaseWaitingText:
+			setText(hCountdown, "Delay πριν από κείμενο: "+formatDuration(d))
+		case phaseWaitingEnter:
+			setText(hCountdown, "Delay πριν από Enter: "+formatDuration(d))
+		}
 		return
 	}
-	total := int64(d.Round(time.Second).Seconds())
-	if total < 0 {
-		total = 0
-	}
-	days := total / 86400
-	total %= 86400
-	hours := total / 3600
-	total %= 3600
-	mins := total / 60
-	secs := total % 60
-	if days > 0 {
-		setText(hCountdown, fmt.Sprintf("Απομένει: %d ημ. %02d:%02d:%02d", days, hours, mins, secs))
-	} else {
-		setText(hCountdown, fmt.Sprintf("Απομένει: %02d:%02d:%02d", hours, mins, secs))
+	switch phase {
+	case phaseWaitingTrigger:
+		beginSequence(time.Now())
+	case phaseWaitingText:
+		performTextStep()
+	case phaseWaitingEnter:
+		performEnterStep()
 	}
 }
 
@@ -490,19 +697,19 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		case idStart:
 			startSchedule()
 		case idCancel:
-			cancelSchedule(true)
+			cancelRun(true)
 		case idTest:
-			executeEnter(true)
+			startTest()
 		}
 		return 0
 	case WM_TIMER:
 		if wParam == timerID {
-			updateCountdown()
+			updateRunner()
 			return 0
 		}
 	case WM_CLOSE:
-		if scheduling {
-			if showMessage(appTitle, "Υπάρχει ενεργός προγραμματισμός. Θέλεις να κλείσεις το πρόγραμμα και να τον ακυρώσεις;", MB_YESNO|MB_ICONWARNING) != IDYES {
+		if runActive {
+			if showMessage(appTitle, "Υπάρχει ενεργός προγραμματισμός/δοκιμή. Θέλεις να κλείσεις το πρόγραμμα και να τον ακυρώσεις;", MB_YESNO|MB_ICONWARNING) != IDYES {
 				return 0
 			}
 		}
@@ -539,16 +746,16 @@ func applyFont(handles ...uintptr) {
 }
 
 func initUI() {
-	createControl("STATIC", "Παράθυρο-στόχος:", SS_LEFT, 24, 20, 170, 24, 0)
-	hTarget = createControl("COMBOBOX", "", WS_TABSTOP|WS_VSCROLL|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 24, 48, 395, 300, idTargetCombo)
-	hRefresh = createControl("BUTTON", "Ανανέωση", WS_TABSTOP|BS_PUSHBUTTON, 430, 47, 118, 30, idRefresh)
-	hSelected = createControl("STATIC", "Επιλεγμένο: —", SS_LEFT, 24, 84, 520, 22, 0)
+	createControl("STATIC", "Παράθυρο-στόχος:", SS_LEFT, 24, 18, 170, 24, 0)
+	hTarget = createControl("COMBOBOX", "", WS_TABSTOP|WS_VSCROLL|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 24, 44, 495, 300, idTargetCombo)
+	hRefresh = createControl("BUTTON", "Ανανέωση", WS_TABSTOP|BS_PUSHBUTTON, 531, 43, 145, 30, idRefresh)
+	hSelected = createControl("STATIC", "Επιλεγμένο: —", SS_LEFT, 24, 80, 652, 22, 0)
 
-	createControl("STATIC", "Επιλογή ώρας:", SS_LEFT, 24, 117, 170, 24, 0)
-	createControl("STATIC", "Ώρα", SS_LEFT, 38, 149, 50, 22, 0)
-	hHour = createControl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 89, 145, 74, 300, idHourCombo)
-	createControl("STATIC", ":", SS_LEFT, 169, 149, 12, 22, 0)
-	hMinute = createControl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 183, 145, 74, 500, idMinuteCombo)
+	createControl("STATIC", "Ώρα πρώτης εκτέλεσης:", SS_LEFT, 24, 112, 180, 24, 0)
+	createControl("STATIC", "Ώρα", SS_LEFT, 210, 112, 36, 22, 0)
+	hHour = createControl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 247, 108, 70, 300, idHourCombo)
+	createControl("STATIC", ":", SS_LEFT, 322, 112, 12, 22, 0)
+	hMinute = createControl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|CBS_HASSTRINGS, 336, 108, 70, 500, idMinuteCombo)
 	for i := 0; i < 24; i++ {
 		addComboItem(hHour, fmt.Sprintf("%02d", i))
 	}
@@ -559,15 +766,42 @@ func initUI() {
 	selectCombo(hHour, now.Hour())
 	selectCombo(hMinute, now.Minute())
 
-	hCountdown = createControl("STATIC", "Απομένει: —", SS_LEFT, 38, 183, 500, 24, 0)
-	hStart = createControl("BUTTON", "Έναρξη", WS_TABSTOP|BS_DEFPUSHBUTTON, 24, 219, 165, 40, idStart)
-	hCancel = createControl("BUTTON", "Ακύρωση", WS_TABSTOP|BS_PUSHBUTTON, 202, 219, 165, 40, idCancel)
-	hTest = createControl("BUTTON", "Δοκιμή Enter", WS_TABSTOP|BS_PUSHBUTTON, 380, 219, 168, 40, idTest)
-	hMinimize = createControl("BUTTON", "Ελαχιστοποίηση μετά την έναρξη", WS_TABSTOP|BS_AUTOCHECKBOX, 24, 273, 330, 27, idMinimize)
-	hStatus = createControl("STATIC", "Φόρτωση παραθύρων…", SS_LEFT, 24, 315, 524, 42, 0)
+	createControl("STATIC", "Delay πριν από κείμενο:", SS_LEFT, 24, 154, 185, 24, 0)
+	hPreDelay = createEdit("0", true, 210, 149, 120, 28, idPreDelay, 10)
+	createControl("STATIC", "ms", SS_LEFT, 338, 154, 35, 22, 0)
 
-	applyFont(hTarget, hRefresh, hSelected, hHour, hMinute, hCountdown, hStart, hCancel, hTest, hMinimize, hStatus)
-	setSchedulingControls(false)
+	createControl("STATIC", "Κείμενο:", SS_LEFT, 24, 195, 85, 24, 0)
+	hText = createEdit("", false, 110, 190, 566, 28, idText, maxTextUTF16Units)
+
+	createControl("STATIC", "Delay κειμένου → Enter:", SS_LEFT, 24, 236, 185, 24, 0)
+	hPostDelay = createEdit("250", true, 210, 231, 120, 28, idPostDelay, 10)
+	createControl("STATIC", "ms", SS_LEFT, 338, 236, 35, 22, 0)
+
+	createControl("STATIC", "Loop κάθε:", SS_LEFT, 24, 278, 82, 24, 0)
+	hLoopHours = createEdit("0", true, 110, 273, 68, 28, idLoopHours, 6)
+	createControl("STATIC", "ώ", SS_LEFT, 183, 278, 20, 22, 0)
+	hLoopMinutes = createEdit("0", true, 210, 273, 58, 28, idLoopMinutes, 2)
+	createControl("STATIC", "λ", SS_LEFT, 273, 278, 20, 22, 0)
+	hLoopSeconds = createEdit("0", true, 300, 273, 58, 28, idLoopSeconds, 2)
+	createControl("STATIC", "δ", SS_LEFT, 363, 278, 20, 22, 0)
+	hLoopMs = createEdit("0", true, 390, 273, 72, 28, idLoopMillis, 3)
+	createControl("STATIC", "ms", SS_LEFT, 468, 278, 28, 22, 0)
+	createControl("STATIC", "(όλα 0 = μία εκτέλεση)", SS_LEFT, 506, 278, 170, 22, 0)
+
+	hCountdown = createControl("STATIC", "Απομένει: —", SS_LEFT, 24, 321, 652, 26, 0)
+	hStart = createControl("BUTTON", "Έναρξη", WS_TABSTOP|BS_DEFPUSHBUTTON, 24, 358, 210, 42, idStart)
+	hCancel = createControl("BUTTON", "Ακύρωση", WS_TABSTOP|BS_PUSHBUTTON, 245, 358, 210, 42, idCancel)
+	hTest = createControl("BUTTON", "Δοκιμή ακολουθίας", WS_TABSTOP|BS_PUSHBUTTON, 466, 358, 210, 42, idTest)
+	hMinimize = createControl("BUTTON", "Ελαχιστοποίηση μετά την έναρξη", WS_TABSTOP|BS_AUTOCHECKBOX, 24, 416, 330, 27, idMinimize)
+	hStatus = createControl("STATIC", "Φόρτωση παραθύρων…", SS_LEFT, 24, 460, 652, 58, 0)
+
+	applyFont(
+		hTarget, hRefresh, hSelected, hHour, hMinute,
+		hPreDelay, hText, hPostDelay,
+		hLoopHours, hLoopMinutes, hLoopSeconds, hLoopMs,
+		hCountdown, hStart, hCancel, hTest, hMinimize, hStatus,
+	)
+	setRunControls(false)
 	refreshWindowList(false)
 }
 
@@ -579,7 +813,7 @@ func writeCrashLog(v any) string {
 		dir = syscall.UTF16ToString(temp[:n])
 	}
 	path := filepath.Join(dir, "Enter_Scheduler_error.txt")
-	text := fmt.Sprintf("Enter Scheduler v3 panic: %v\nTime: %s\n\n%s\n", v, time.Now().Format(time.RFC3339), debug.Stack())
+	text := fmt.Sprintf("Enter Scheduler v4 panic: %v\nTime: %s\n\n%s\n", v, time.Now().Format(time.RFC3339), debug.Stack())
 	_ = os.WriteFile(path, []byte(text), 0644)
 	return path
 }
@@ -607,7 +841,7 @@ func main() {
 		return
 	}
 
-	width, height := int32(590), int32(410)
+	width, height := int32(720), int32(570)
 	var wa RECT
 	pSystemParametersInfoW.Call(SPI_GETWORKAREA, 0, uintptr(unsafe.Pointer(&wa)), 0)
 	screenW, screenH := int32(wa.Right-wa.Left), int32(wa.Bottom-wa.Top)
@@ -650,5 +884,3 @@ func main() {
 		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 }
-
-var _ = strconv.IntSize
